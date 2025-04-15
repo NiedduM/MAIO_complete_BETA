@@ -122,7 +122,7 @@ class LocalKAU(ap.Agent):
         
         for comm in self.capital_stock.keyes():
             
-            self.target_capital[comm] = self.capital_coeff*self.expected_demand/((1-self.tech_coeff[self.my_commodity])*self.capacity_utilization_target)
+            self.target_capital[comm] = self.capital_coeff[comm]*self.expected_demand/((1-self.tech_coeff[self.my_commodity])*self.capacity_utilization_target)
 
 
     def plan_production(self):

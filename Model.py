@@ -319,6 +319,8 @@ class MyModel(ap.Model):
         
         self.Household_agents.pay_taxes()
         
+        self.localKAU_agents.pay_taxes()
+        
         self.Government.make_period_account()
         
         
