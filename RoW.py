@@ -61,7 +61,7 @@ class RoW(ap.Agent):
     
     def update_GDP(self):
                         
-        self.GDP *= (1+self.growth_rate*self.GDP)
+        self.GDP *= 1+self.growth_rate
         
         for comm in self.consumption_shares.keys():
             

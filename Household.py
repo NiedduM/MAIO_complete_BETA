@@ -41,6 +41,7 @@ class Household(ap.Agent):
         self.employer_id = -1
         self.flag_employed = 0
         self.wage = 0
+        self.gov_transfer = 0
         
         self.my_bank = object()
         
@@ -199,6 +200,19 @@ class Household(ap.Agent):
         self.wealth += wage
         self.my_bank.deposits[self.id] += wage
         
+    def receive_unemployment_benefit(self, ub):
+        
+        self.wage = ub
+        self.wealth += ub
+        self.my_bank.deposits[self.id] += ub  
+        
+    def reveice_transfer(self, transfer_amount):
+        
+        self.gov_transfer = transfer_amount
+        self.wealth += transfer_amount
+        self.my_bank.deposits[self.id] += transfer_amount       
+         
+        
     def search_job(self):
                 
         employers = self.model.localKAU_agents.select(self.model.localKAU_agents.flag_vacancies == 1)
@@ -219,7 +233,7 @@ class Household(ap.Agent):
         
     def determine_disposable_income(self):
         
-        self.income = self.dividends + self.wage
+        self.income = self.dividends + self.wage + self.gov_transfer
         
         rates = self.model.Government.tax_rates['labor']
         my_income_rate = 0
@@ -230,10 +244,8 @@ class Household(ap.Agent):
                 
                 my_income_rate = rates[inc_class]
                 break
-        
-        
-        self.labor_tax = self.wage*my_income_rate
-        
+                
+        self.labor_tax = self.wage*my_income_rate        
         
         self.dividend_tax = self.dividends*self.model.Government.tax_rates['dividends']
         
