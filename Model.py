@@ -39,7 +39,7 @@ class MyModel(ap.Model):
         
         self.nBuyers = self.p.nKAUs + self.p.nHouseholds + 2
         
-        self.seller_agents = self.localKAU_agents + self.RoW
+        self.seller_agents = self.localKAU_agents #+ self.RoW
         
         
         self.round_number = self.p.round_number
@@ -60,14 +60,31 @@ class MyModel(ap.Model):
         self.initialize_households()
         self.initialize_banks()
             
-        self.Government.liquidity = self.p.Gov_var['liquidity']
-        self.Government.tax_rates = self.p.Gov_var['tax_rates'].copy()
-        self.Government.consumption_shares = self.p.Gov_var['consumption_shares'].copy()
-
-        self.RoW.liquidity = self.p.RoW_var['liquidity']
-        self.RoW.suppliers_weights = self.p.RoW_var['suppliers_weights'].copy()
-        self.RoW.consumption_shares = self.p.RoW_var['consumption_shares'].copy()
-
+        for g in self.Government:
+            g.liquidity = self.p.Gov_var['liquidity']
+            g.tax_rates = self.p.Gov_var['tax_rates'].copy()
+            g.consumption_shares = self.p.Gov_var['consumption_shares'].copy()
+            g.consumption_from_RoW = self.p.Gov_var['consumption_from_RoW'].copy()
+            g.ub_fraction = self.p.Gov_var['ub_fraction']
+            g.transfer_fraction = self.p.Gov_var['transfer_fraction']
+            g.consumptions = {com: 0 for com in g.consumption_shares.keys()}
+            print(g.tax_rates)
+        
+        for R in self.RoW:
+            
+            R.liquidity = self.p.RoW_var['liquidity']
+            R.suppliers_weights = {}
+            
+            for comm in self.p.RoW_var['suppliers_weights'].keys():
+                print(comm)
+                sellers = self.seller_agents.select(self.seller_agents.my_commodity == comm)
+                R.suppliers_weights[comm] =  {s:  self.p.RoW_var['suppliers_weights'][comm][i] for i,s in enumerate(sellers )} 
+            R.consumption_shares = self.p.RoW_var['consumption_shares'].copy()
+            R.GDP = self.p.RoW_var['GDP']
+            R.consumption2GDP = self.p.RoW_var['consumption2GDP']
+            R.prices = self.p.RoW_var['prices'].copy()
+            R.sails = {comm: 0 for comm in R.consumption_shares.keys()}
+            R.consumptions = {comm: 0 for comm in R.consumption_shares.keys()}
         
         self.shocks_counter = 0
             
@@ -93,15 +110,16 @@ class MyModel(ap.Model):
         for i, lk in enumerate(self.localKAU_agents):
             
             lk.commodities_stock = self.p.localKAUs_var['commodities_stock'][i].copy()
-            lk.capital_stocks = self.p.localKAUs_var['capital_stock'][i].copy()
+            lk.capital_stocks = self.p.localKAUs_var['capital_stocks'][i].copy()
             
             lk.tech_coeff = self.p.localKAUs_var['tech_coeff'][i].copy()
             lk.capital_coeff = self.p.localKAUs_var['capital_coeff'][i].copy()
             lk.capital_depreciation = self.p.localKAUs_var['capital_depreciation'][i].copy()
             
-            lk.prices = self.p.localKAUs_var['prices'].copy()
+            lk.prices = self.p.localKAUs_var['prices'][i].copy()
             lk.price = lk.prices[lk.my_commodity]
             
+            lk.consumption_from_RoW = self.p.localKAUs_var['consumption_from_RoW'][i].copy()
             
             lk.unit_cost = 0
             
@@ -126,19 +144,19 @@ class MyModel(ap.Model):
             
             lk.previous_demand = self.p.localKAUs_var['previous_demand'][i] #.copy()
             lk.expected_demand = lk.previous_demand
-            #lk.demand_change = lk.previous_demand
             
-            lk.markup = self.p.localKAUs_var['markup'][i]
+            #lk.markup = self.p.localKAUs_var['markup'][i]
             
             lk.independence_periods = self.p.localKAUs_var['independence_periods'][i]
-            lk.target_capacity_utilization = self.p.localKAUs_var['target_capacity_utilization'][i]
+            lk.target_capacity_utilization = self.p.localKAUs_var['target_capacity_utilization'][i].copy()
             
             lk.target_speed = self.p.localKAUs_var['target_speed'][i]
             lk.markup_speed = self.p.localKAUs_var['markup_speed'][i]
-            lk.earnings = self.p.localKAUs_var['earnings'][i]
+            lk.net_earnings = self.p.localKAUs_var['net_earnings'][i]
             
-            lk.my_seller = {}#self.p.localKAUs_var['my_seller'][i].copy()     
+            lk.capital_target_speed = self.p.localKAUs_var['capital_target_speed'][i]
             
+            lk.my_seller = {}
             
             for com in self.p.localKAUs_var['my_seller'][i].keys():
                 
@@ -159,6 +177,7 @@ class MyModel(ap.Model):
                 lk.capital_purchase[k] = 0
                 lk.capital_demanded_quantity[k] = 0
                 lk.total_demanded_quantity[k] = 0
+                lk.capital_cost_qt[k] = 0
                 
                 
                 n_seller = round(lk.field_of_view*len(self.localKAU_agents.select(self.localKAU_agents.my_commodity == k)))
@@ -166,7 +185,7 @@ class MyModel(ap.Model):
                 list_seller = self.localKAU_agents.select(self.localKAU_agents.my_commodity == k).random(n_seller)
                 lk.sellers_list[k] = [s for s in list_seller]
             
-            lk.sellers_list.append(self.RoW)
+            #lk.sellers_list.append(self.RoW)
             
             lk.wage_offer = self.p.localKAUs_var['wage_offer'][i]
             lk.labor_tech_coeff = self.p.localKAUs_var['labor_tech_coeff'][i]
@@ -183,9 +202,10 @@ class MyModel(ap.Model):
             h.wealth2income_target =  self.p.Households_var['wealth2income_target'][i]
             h.csi = self.p.Households_var['csi'][i]
             h.consumption_shares = self.p.Households_var['consumption_shares'][i].copy()
-            
+            h.consumption_from_RoW = self.p.Households_var['consumption_from_RoW'][i].copy()
             h.my_seller = self.p.Households_var['my_seller'][i].copy()
             
+            h.consumptions_qt = {com: 0 for com in h.consumption_shares.keys()}
             for com in self.p.Households_var['my_seller'][i].keys():
                 
                 index = int(self.p.Households_var['my_seller'][i][com])
@@ -202,7 +222,7 @@ class MyModel(ap.Model):
                 n_seller = max(1,n_seller)
                 list_seller = self.localKAU_agents.select(self.localKAU_agents.my_commodity == k).random(n_seller)
                 h.sellers_list[k] = [s for s in list_seller]
-            h.sellers_list.append(self.RoW)
+            #h.sellers_list.append(self.RoW)
                 #print([sell.id for sell in h.sellers_list[k]])
                 
             selected = np.random.randint(0,high = self.p.nBanks)
@@ -254,6 +274,7 @@ class MyModel(ap.Model):
     def step(self):
         
         
+        self.RoW.update_GDP()
         
         if(self.p.shocks['active']):
             
@@ -284,10 +305,8 @@ class MyModel(ap.Model):
         self.localKAU_agents.produce()
         
         self.localKAU_agents.set_price()
-        
-        self.Household_agents.determine_consumption_budgets()
                 
-        self.localKAU_agents.adjust_demanded_quantity()
+        #self.localKAU_agents.adjust_demanded_quantity()
         
         self.localKAU_agents.depreciate_capital()
         
@@ -297,7 +316,9 @@ class MyModel(ap.Model):
         
         self.Government.determine_consumption_budgets()
         
-        self.Row.determine_consumption_budgets()
+        self.RoW.determine_consumption_budgets()
+        
+        self.Household_agents.determine_consumption_budgets()
         
         for commodity in self.p.commodities_list:
             
@@ -323,7 +344,6 @@ class MyModel(ap.Model):
         
         self.Government.make_period_account()
         
-        
     def update(self):
         
         
@@ -332,18 +352,28 @@ class MyModel(ap.Model):
         self.record('Total Revenues', sum(self.localKAU_agents.revenues))
         #self.record('Intermediate consumption', sum(sum([self.localKAU_agents.inputs_consumption[k] for k in self.localKAU_agents.inputs_consumption.keys()])))
         self.record('Total costs', sum(self.localKAU_agents.total_costs))
-        self.record('GDP', sum(self.Household_agents.income))
+        self.record('GDP', sum(self.Household_agents.consumption) + self.Government[0].consumption + sum(self.RoW[0].consumptions.values()) - sum(self.RoW[0].sails.values()))
         self.record('Firms liquidity', sum(self.Firm_agents.wealth))
         self.record('Households liquidity', sum(self.Household_agents.wealth))
-        self.record('Total liquidity',sum(self.Firm_agents.wealth) +  sum(self.Household_agents.wealth))
+        self.record('Total liquidity',sum(self.Firm_agents.wealth) +  sum(self.Household_agents.wealth) + self.Government[0].liquidity + self.RoW[0].liquidity)
         #@self.record('Integral', self.calculate_integral())
-        self.record('Consumption', sum(self.Household_agents.consumption))
+        self.record('Consumption', sum(self.Household_agents.consumption)+ self.Government[0].consumption)
         
         # SECTORIAL VARIABLES
         for com in self.p.commodities_list:
             self.record('Real production of '+ com, sum(self.localKAU_agents.select(self.localKAU_agents.my_commodity == com).production))
             #self.record('Nominal production of'+ com, sum(self.localKAU_agents.select(self.localKAU_agents.my_commodity == com).production*self.localKAU_agents.select(self.localKAU_agents.my_commodity == com).price)            
+            G_cons  =self.Government[0].consumptions[com]
+            H_cons = sum([h.consumptions_qt[com] for h in self.Household_agents])
+            self.record('G_Consumption of '+ com, G_cons)
+            self.record('H_Consumption of' + com, H_cons)
+            self.record('Total_consumption'+com, G_cons+H_cons)
+        self.Government.record('liquidity')
+        self.Government.record('consumption')
         
+        self.RoW.record('liquidity')
+        self.RoW[0].record('RoW_consumption', sum(self.RoW[0].consumptions.values())) 
+        self.RoW[0].record('RoW_sails', sum(self.RoW[0].sails.values()))
         # FIRMS
         
         self.Firm_agents.record('wealth')
@@ -364,7 +394,6 @@ class MyModel(ap.Model):
        
         self.localKAU_agents.record('production')
         self.localKAU_agents.record('price')
-        self.localKAU_agents.record('markup')
         self.localKAU_agents.record('supply')
         self.localKAU_agents.record('previous_demand')
         self.localKAU_agents.record('earnings')
@@ -375,11 +404,13 @@ class MyModel(ap.Model):
         for lk in self.localKAU_agents:
             for com in self.p.commodities_list:
                 lk.record(com+' stock', lk.commodities_stock[com])
+                lk.record(com+' cap_stock', lk.capital_stocks[com])
         
         int_cons = 0
         for lk in self.localKAU_agents:
             for com in self.p.commodities_list:
                 lk.record( com + ' consumption', lk.inputs_consumption[com])
+                lk.record(com+'cap_consumption', lk.capital_purchase[com])
                 int_cons += lk.inputs_consumption[com]
         self.record('Int_cons', int_cons)
         

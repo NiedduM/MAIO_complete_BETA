@@ -30,6 +30,7 @@ class LocalKAU(ap.Agent):
         self.total_costs = 0
         self.revenues = 0
         self.earnings = 0
+        self.net_earnings = 0
         self.sold_quantity = 0 
         self.inputs_consumption = {}
         self.total_expenditure = {}
@@ -67,6 +68,7 @@ class LocalKAU(ap.Agent):
         self.target_stock = {}
         
         # CAPITAL
+        self.capital_target_speed = 0
         self.capital_coeff = {}
         self.capital_depreciation = {}     
         self.target_capital = {}
@@ -74,9 +76,10 @@ class LocalKAU(ap.Agent):
         self.capital_demanded_quantity =  {}
         self.capital_stocks = {}
         self.capital_stocks_value = {}
-        self.capacity_utilization_target = 0
-        self.capital_quote = 0
+        self.target_capacity_utilization = {}
+        self.capital_quote = {}
         self.total_demanded_quantity = {}
+        self.capital_cost_qt = {}
         
         self.my_firm = object()
         
@@ -87,6 +90,10 @@ class LocalKAU(ap.Agent):
         self.employees_list = []
         self.labor_tech_coeff = 0
         self.max_straordinari = 0.3
+        
+        # RoW
+        
+        self.consumption_from_RoW = {}
 
 ##############################
 # DEMAND EXPECTATIONS FORMATION
@@ -120,9 +127,13 @@ class LocalKAU(ap.Agent):
  
     def set_capital_targets(self):
         
-        for comm in self.capital_stock.keyes():
+        for comm in self.capital_stocks.keys():
             
-            self.target_capital[comm] = self.capital_coeff[comm]*self.expected_demand/((1-self.tech_coeff[self.my_commodity])*self.capacity_utilization_target)
+            if(self.target_capacity_utilization[comm]>0):
+                self.target_capital[comm] = self.capital_coeff[comm]*self.expected_demand/((1-self.tech_coeff[self.my_commodity])*self.target_capacity_utilization[comm])
+            else:
+                self.target_capital[comm] = self.capital_stocks[comm]
+                
 
 
     def plan_production(self):
@@ -131,15 +142,16 @@ class LocalKAU(ap.Agent):
         
         delta_capital_stock = 0
         if(self.capital_coeff[self.my_commodity]>0):
-            delta_capital_stock = self.target_speed*(self.target_capital[self.my_commodity] - self.capital_stocks[self.my_commodity])
+            delta_capital_stock = self.capital_target_speed*(self.target_capital[self.my_commodity] - self.capital_stocks[self.my_commodity])
         
         self.production_planned = (self.expected_demand + delta_stock + delta_capital_stock)/(1-self.tech_coeff[self.my_commodity])
         self.production_planned = max(self.production_planned, 0)
+        #print(self.id, self.production_planned)
 
         Prod_max = min([self.commodities_stock[k]/self.tech_coeff[k] if self.tech_coeff[k]!=0 else math.inf for k in self.commodities_stock.keys()])    #updated 3 Jun 24 
         Prod_max_capital = min([self.capital_stocks[k]/self.capital_coeff[k] if self.capital_coeff[k]!=0 else math.inf for k in self.commodities_stock.keys()])    #updated 3 Jun 24 
         self.production_planned = min(Prod_max, Prod_max_capital, self.production_planned)
-        
+        #print(self.id, self.production_planned, Prod_max, Prod_max_capital)
         
     def plan_demanded_quantities(self):
     
@@ -163,8 +175,8 @@ class LocalKAU(ap.Agent):
         
     def plan_demanded_capital_quantity(self, commodity):
         
-        demanded_quantity = self.capital_stocks[commodity]*self.capital_depreciation[commodity] + self.target_speed*(self.target_capital[commodity] - self.capital_stocks[commodity])
-        
+        #demanded_quantity = self.capital_stocks[commodity]*self.capital_depreciation[commodity] + self.capital_target_speed*(self.target_capital[commodity] - self.capital_stocks[commodity])
+        demanded_quantity = self.production_planned*self.capital_coeff[commodity]*self.capital_depreciation[commodity] + self.capital_target_speed*(self.target_capital[commodity] - self.capital_stocks[commodity])
         demanded_quantity = max(0,demanded_quantity)
         
         return demanded_quantity
@@ -174,7 +186,9 @@ class LocalKAU(ap.Agent):
         for comm in self.demanded_quantity.keys():
             self.total_demanded_quantity[comm] = self.demanded_quantity[comm] + self.capital_demanded_quantity[comm]
             #self.total_demanded_quantity[comm] = min(total_demand, self.my_firm.cash_for_KAU[self.id]/self.prices[comm])
-            self.capital_quote = self.capital_demanded_quantity[comm]/self.total_demanded_quantity[comm]
+            self.capital_quote[comm] = 0
+            if(self.total_demanded_quantity[comm]>0):
+                self.capital_quote[comm] = self.capital_demanded_quantity[comm]/self.total_demanded_quantity[comm]
 
     def plan_labor_demand(self):
         
@@ -184,8 +198,8 @@ class LocalKAU(ap.Agent):
         
         no_employees_gap = no_employees_needed - no_employees
         
-        print('Test KAU ',self.id, no_employees,no_employees_needed, no_employees_gap)
-        if(no_employees_gap<0):
+        #print('Test KAU ',self.id, no_employees,no_employees_needed, no_employees_gap)
+        if(no_employees_gap<=0):
             no_firings = int(-no_employees_gap)
             
             for i in range(no_firings):
@@ -260,15 +274,16 @@ class LocalKAU(ap.Agent):
         
         self.total_wage_payment = self.wage_offer*self.production_planned*self.labor_tech_coeff
         
-        wage4worker = self.total_wage_payment/len(self.employees_list)
-        
-        for wk in self.employees_list:
+        if(len(self.employees_list)>0):
+            wage4worker = self.total_wage_payment/len(self.employees_list)
             
-            wk.receive_wage(wage4worker)
-            
+            for wk in self.employees_list:
+                
+                wk.receive_wage(wage4worker)
+                
         #self.my_firm.update_cash_for_KAU(self.id, - self.total_wage_payment)    
         
-        print('wage payment', wage4worker)
+        #print('wage payment', wage4worker)
         #ATTENZIONE: NECESSARIO METTERE UN CONTROLLO SU STOCK MONETA        
       
 ##############################
@@ -308,6 +323,7 @@ class LocalKAU(ap.Agent):
         for k in self.inputs_consumption.keys():
             self.inputs_consumption[k] = 0
             self.total_expenditure[k] = 0
+            self.capital_purchase[k] = 0
 
          
         
@@ -350,7 +366,7 @@ class LocalKAU(ap.Agent):
              
         if(total_planned_expenditure> self.my_firm.cash_for_KAU[self.id]):
             
-            factor = total_planned_expenditure/self.my_firm.cash_for_KAU[self.id]
+            factor = total_planned_expenditure/self.my_firm.cash_for_KAU[self.id] ### l'inverso, correggere
             
             for comm in self.total_demanded_quantity.keys():
                 
@@ -376,6 +392,8 @@ class LocalKAU(ap.Agent):
         self.revenues += self.price*sold_quantity
 
         self.my_firm.update_cash_for_KAU(self.id, self.price*sold_quantity)
+        
+        #print(self.id,self.previous_demand, demand, sold_quantity)
         
         return sold_quantity
 
@@ -432,6 +450,8 @@ class LocalKAU(ap.Agent):
             
             if(self.attempt_number == 0):
                 
+                self.buy_from_RoW(commodity)
+                
                 r = np.random.random()
                 
                 if(r< self.opportunism_degree):
@@ -476,8 +496,31 @@ class LocalKAU(ap.Agent):
             self.my_seller[commodity] = new_seller
             
         print(self.id, 'I changed my seller')             
+
                  
-                 
+    def buy_from_RoW(self, commodity):
+        
+        RoW = self.model.RoW[0]
+        price = RoW.get_price(commodity)
+        
+        demanded_quantity = min(self.my_firm.cash_for_KAU[self.id]/price, self.consumption_from_RoW[commodity]*self.total_demanded_quantity[commodity] )
+        bought_quantity = RoW.sell(commodity, demanded_quantity)
+                    
+        capital_bought_quantity = self.capital_quote[commodity]*bought_quantity
+        inputs_bought_quantity = bought_quantity - capital_bought_quantity
+        
+        self.commodities_stock[commodity] += inputs_bought_quantity
+        self.inputs_consumption[commodity] += inputs_bought_quantity
+        
+        self.capital_stocks[commodity] += capital_bought_quantity
+        self.capital_purchase[commodity] += capital_bought_quantity
+        
+        self.total_demanded_quantity[commodity] -= bought_quantity
+        expenditure = bought_quantity*price
+        self.total_expenditure[commodity] += expenditure
+        self.my_firm.update_cash_for_KAU(self.id, -expenditure)
+
+            
 
     def buy_from_sellers_list(self, commodity):
 
@@ -528,7 +571,7 @@ class LocalKAU(ap.Agent):
             
             if(self.inputs_consumption[commodity]>0):
                 
-                self.prices[commodity] = self.total_expenditure[commodity]/self.inputs_consumption[commodity]
+                self.prices[commodity] = self.total_expenditure[commodity]/(self.inputs_consumption[commodity] +self.capital_purchase[commodity])
                 #print(self.prices[commodity])
             
 
@@ -546,16 +589,22 @@ class LocalKAU(ap.Agent):
         delta_stock = self.commodities_stock_value[self.my_commodity] - self.my_commodity_stock_value_old
         
         
-        tax_rate = self.model.Government.tax_rates['VAT'][self.my_commodity]
+        tax_rate = self.model.Government[0].tax_rates['VAT'][self.my_commodity]
         
         self.VAT = tax_rate/(1+tax_rate)*self.revenues
         
+        for comm in self.capital_stocks.keys():
+            
+            self.total_costs += self.capital_cost_qt[comm]*self.prices[comm]
+        
         self.earnings = max(0, self.revenues - self.total_costs + delta_stock)
         
-        self.net_earnings = max(0, self.revenues -self.VAT - self.total_costs + delta_stock)
+        earnings_outVAT = max(0, self.revenues -self.VAT - self.total_costs + delta_stock)
  
-        self.income_tax = self.net_earnings*self.Government.tax_rates['corporate']
+        self.income_tax = earnings_outVAT*self.model.Government[0].tax_rates['corporate']
+        #print(self.id, self.VAT, self.income_tax)
 
+        self.net_earnings = earnings_outVAT - self.income_tax
 ##############################
 # REVALUATIONS METHODS
 ##############################
@@ -578,7 +627,9 @@ class LocalKAU(ap.Agent):
         
         for comm in self.capital_stocks.keys():
             
-            self.capital_stocks[comm] *= (1-self.capital_depreciation[comm])
+            #self.capital_cost_qt[comm] = self.capital_depreciation[comm]*self.capital_stocks[comm]
+            self.capital_cost_qt[comm] = self.capital_depreciation[comm]*self.capital_coeff[comm]*self.production
+            self.capital_stocks[comm] -= self.capital_cost_qt[comm]
 ##############################
 #  ACCESSORY METHODS
 ##############################
@@ -616,4 +667,4 @@ class LocalKAU_price(LocalKAU):
         
         self.my_firm.update_cash_for_KAU(self.id, -expenditure)        
         
-        self.model.Government.receive_taxes(expenditure)
+        self.model.Government[0].receive_taxes(expenditure)

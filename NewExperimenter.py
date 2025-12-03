@@ -12,13 +12,311 @@ import matplotlib.pyplot as plt
 import os as os
 import openpyxl as opxl
 import pickle as pk
+import math as math
 
 class Experimenter(object):
     
     
     def __init__(self):
         
+        self.model = object()
+        
         return
+    
+    def create_initcond_simplified(self,seed, Y, GDP_RoW, RoW_price, c_RoW, alpha_RoW, n_sector, C, delta, gamma, cap_ut ,cap_target_speed, KAU_price, wages, labor_tech_coeff , KAU_from_RoW, n_households, lambdaT, csi, alpha, H_from_RoW, alpha_gov ,Gov_from_RoW, tax_rates, ub_frac, transfer_frac, n_indep_periods =100, shocks = {'active': False}):
+
+
+        
+        A_mod = np.zeros((n_sector, n_sector))
+        
+        for i in range(n_sector):
+            for j in range(n_sector):
+                
+                A_mod[i,j] = C[i,j]
+                
+                if(cap_ut[i,j] >0):
+                    A_mod[i,j] += delta[i,j]*gamma[i,j]    # /cap_ut[i,j] uncomment if you want depreciation proportional to the stock level
+                
+                A_mod[i,j] = KAU_price[i]*A_mod[i,j]/KAU_price[j]
+                
+        a_KAU = np.zeros(n_sector)
+        a_H = np.sum(H_from_RoW*alpha)
+        a_G = np.sum(Gov_from_RoW*alpha_gov)
+        
+        for i in range(n_sector):            
+            for j in range(n_sector):
+                
+                a_KAU[i] += RoW_price[j]/KAU_price[j,0]*KAU_from_RoW[j,i]*A_mod[j,i]
+        
+        A_eff = np.zeros((n_sector, n_sector))
+        A_cost =  np.zeros((n_sector, n_sector))
+        
+        alpha_new = (1-H_from_RoW)*alpha + alpha_RoW*a_H
+        alpha_gov_new = (1-Gov_from_RoW)*alpha_gov + alpha_RoW*a_G    
+        
+        
+        for i in range(n_sector):            
+            for j in range(n_sector): 
+                
+                A_eff[i,j] = (1-KAU_from_RoW[i,j])*A_mod[i,j] + alpha_RoW[i]*a_KAU[j]
+                A_cost[i,j] = (1+ (RoW_price[i]/KAU_price[i] -1)*KAU_from_RoW[i,j])*A_mod[i,j]
+
+        L_eff = np.linalg.inv(np.eye(n_sector) - A_eff)
+        
+        A_d = a_G + np.dot(a_KAU.T, np.dot(L_eff, alpha_gov_new) )
+        B_d = a_H - a_G + np.dot(a_KAU.T, np.dot(L_eff, alpha_new - alpha_gov_new) )
+        
+        d = 1-tax_rates['dividends']
+        
+
+        
+        alpha_eff = alpha_new*d + alpha_gov_new*(1-d)
+        print(alpha_eff)
+        
+        x = np.dot(L_eff, alpha_eff)*Y
+        
+        x = np.reshape(x, (len(x),1)) 
+        q = x/KAU_price
+        
+        
+        
+        
+        params = self.create_par_short(seed, Y, GDP_RoW, RoW_price, c_RoW, alpha_RoW, n_sector, C, delta, gamma, cap_ut,cap_target_speed,  KAU_price, wages, labor_tech_coeff, KAU_from_RoW, n_households, lambdaT, csi, alpha, H_from_RoW, alpha_gov, Gov_from_RoW,  tax_rates, ub_frac, transfer_frac)
+
+        if(c_RoW >0):
+            params['RoW_var']['GDP'] = (A_d + B_d*d)*Y/c_RoW
+        else:
+            params['RoW_var']['GDP'] = 0
+
+        params['localKAUs_var']['tech_coeff'] = []
+        params['localKAUs_var']['commodities_stock'] = []
+        params['localKAUs_var']['capital_coeff'] = []
+        params['localKAUs_var']['capital_stocks'] = []
+        params['localKAUs_var']['capital_depreciation'] = []
+        params['localKAUs_var']['target_capacity_utilization'] = []
+        params['localKAUs_var']['my_seller'] = []
+
+        for j in range(n_sector):
+            
+            params['localKAUs_var']['previous_demand'][j] = (1-C[j,j])*q[j,0]
+            params['localKAUs_var']['markup'][j] = 1/(np.sum(C[:,j])) - 1
+            
+            theta = tax_rates['VAT'][j]
+            earnings = (1-sum(A_mod[:,j]) - theta/(1+theta) )*x[j] - wages[j]*labor_tech_coeff[j]*q[j]
+            
+            params['localKAUs_var']['net_earnings'][j] = (1-tax_rates['corporate'])*earnings
+            
+            tech_coeff_dict = {}
+            stock_dict = {}
+            capital_tech_coeff_dict = {}
+            capital_stock_dict = {}
+            depreciation_dict = {}
+            cap_util_dict = {}
+            
+            my_seller_dict = {}
+            for i,commodity in enumerate(params['commodities_list']):
+                tech_coeff_dict[commodity] = C[i,j]
+                stock_dict[commodity] = C[i,j]*q[j,0]*n_indep_periods
+                capital_tech_coeff_dict[commodity] = gamma[i,j]
+                capital_stock_dict[commodity] = 0
+                if(cap_ut[i,j]>0):
+                    capital_stock_dict[commodity] = gamma[i,j]*q[j,0]/cap_ut[i,j]
+                depreciation_dict[commodity] = delta[i,j]
+                cap_util_dict[commodity] = cap_ut[i,j]
+                my_seller_dict[commodity] = i
+            
+            params['localKAUs_var']['tech_coeff'].append(tech_coeff_dict)
+            params['localKAUs_var']['commodities_stock'].append(stock_dict)
+            params['localKAUs_var']['capital_coeff'].append(capital_tech_coeff_dict)
+            params['localKAUs_var']['capital_stocks'].append(capital_stock_dict)
+            params['localKAUs_var']['capital_depreciation'].append(depreciation_dict)
+            params['localKAUs_var']['target_capacity_utilization'].append(cap_util_dict)
+            params['localKAUs_var']['my_seller'].append(my_seller_dict)
+        
+    
+        KAU_workers = labor_tech_coeff*q
+        for k in range(n_sector):
+            
+            if(KAU_workers[k] - int(KAU_workers[k])>0):
+                KAU_workers[k] = int(KAU_workers[k])+1
+            else:
+                KAU_workers[k] = int(KAU_workers[k])
+        
+        KAU_effective_wage = wages*labor_tech_coeff*q/KAU_workers
+        
+        params['Households_var']['employer'] = [-1 for h in range(n_households)]
+        
+        
+        labor_income = np.sum(wages*labor_tech_coeff*q)
+        average_wage = 0
+        if(np.sum(KAU_workers)>0):
+            average_wage = labor_income/np.sum(KAU_workers)
+        
+        print('w average', average_wage)
+        transfer_h = transfer_frac*average_wage
+        
+        ub_h = ub_frac*average_wage
+        
+        total_profits = np.sum(params['localKAUs_var']['net_earnings'])
+
+        income_common_part = (1- tax_rates['dividends'])*total_profits/n_households + transfer_h
+        
+        
+        params['Households_var']['wealth'] = np.array([lT*income_common_part for lT in lambdaT])
+
+        N_m = 0
+        N_M = 0   
+                
+        for k in range(n_sector):
+            
+
+            N_M += int(KAU_workers[k,0])
+            print(N_M)
+            for h in range(N_m, N_M):
+                
+                params['Households_var']['employer'][h] = k                
+                params['Households_var']['wealth'][h] += lambdaT[h]*KAU_effective_wage[k]*(1-tax_rates['labor'][math.inf]) 
+                
+            N_m = N_M 
+            
+        for h in range(N_M, n_households):
+            
+            params['Households_var']['wealth'][h] += lambdaT[h]*(ub_h) 
+
+            
+        params['localKAUs_var']['prices'] = []
+        for i in range(n_sector):
+            
+            params['localKAUs_var']['prices'].append({comm: KAU_price[j,0]*(1-KAU_from_RoW[j,i]) + RoW_price[j]*KAU_from_RoW[j,i] for j,comm in enumerate(params['commodities_list'])})
+ 
+            
+        labor_tax = labor_income*tax_rates['labor'][math.inf]
+        dvd_tax = total_profits*tax_rates['dividends']
+        corporate_tax = total_profits*tax_rates['corporate']/(1-tax_rates['corporate'])
+        VAT = np.sum(tax_rates['VAT']/(1+tax_rates['VAT']) * x)
+        
+        params['Gov_var']['liquidity'] = labor_tax + dvd_tax + corporate_tax + VAT
+        
+        print('test',params['Gov_var']['liquidity'] - transfer_h*n_households - ub_h*(n_households-N_M), (1-d)*Y)
+        
+        
+        
+        
+        return params
+    
+    
+    def create_par_short(self,seed, Y, GDP_RoW, RoW_price, c_RoW, alpha_RoW, n_sector, C, delta, gamma, cap_ut , cap_target_speed, KAU_price, wages, labor_tech_coeff , KAU_from_RoW, n_households, lambdaT, csi, alpha, H_from_RoW, alpha_gov ,Gov_from_RoW, tax_rates, ub_frac, transfer_frac, rat_threshold = 1, n_indep_periods =100, shocks = {'active': False}):
+
+        params = {}
+        
+        params['shocks'] = shocks
+        
+        params['seed'] = seed      
+        params['KAUtype'] = 'price'        
+        params['round_number'] = 5
+                
+        
+        params['nFirms'] = n_sector
+        params['nKAUs'] = n_sector
+        params['nHouseholds'] = n_households
+
+        params['activities_list'] = ['A' + str(i) for i  in range(1,n_sector+1)]      
+        params['commodities_list'] = ['P' + str(i) for i  in range(1,n_sector+1) ]
+        
+        params['KAUactivity_list'] = ['A' + str(i) for i  in range(1,n_sector+1)]   
+        params['KAUcommodity_list'] = ['P' + str(i) for i  in range(1,n_sector+1) ]
+        
+
+        params['KAUFirm_list'] =  list(np.arange(n_sector))
+        
+        params['RoW_var'] = {}
+        params['RoW_var']['consumption_shares'] = { comm: alpha_RoW[i] for (i,comm) in enumerate(params['commodities_list'])}
+        params['RoW_var']['liquidity'] = 100*GDP_RoW
+        #params['RoW_var']['GDP'] = GDP_RoW
+        params['RoW_var']['consumption2GDP'] = c_RoW
+        params['RoW_var']['suppliers_weights'] = {comm: [1] for comm in params['commodities_list']}
+        params['RoW_var']['prices'] = {comm: RoW_price[i] for i,comm in enumerate(params['commodities_list'])}
+        
+        params['Gov_var'] = {}
+        #params['Gov_var']['liquidity']
+        params['Gov_var']['tax_rates'] = tax_rates.copy()
+        params['Gov_var']['tax_rates']['VAT'] = {comm: tax_rates['VAT'][i] for (i,comm) in enumerate(params['commodities_list'])}
+        params['Gov_var']['consumption_shares'] = { comm: alpha_gov[i] for (i,comm) in enumerate(params['commodities_list'])}
+        params['Gov_var']['consumption_from_RoW'] = {comm: Gov_from_RoW[i] for i,comm in enumerate(params['commodities_list'])} 
+        params['Gov_var']['ub_fraction'] = ub_frac
+        params['Gov_var']['transfer_fraction'] = transfer_frac
+
+        params['nBanks'] = 1
+        
+        params['Banks_var'] = {}        
+        params['Banks_var']['reserves'] = [1000]
+        params['Banks_var']['CAR'] = [0]
+        params['Banks_var']['interest_rate'] = [0.0]        
+        params['Banks_var']['threshold'] = [-1]
+        params['Banks_var']['repayment_time'] = [1]    
+
+
+
+        params['Firms_var'] = {}
+        
+        params['Firms_var']['loans'] = [list() for i in range(n_sector)]
+        params['Firms_var']['wealth'] = [1000*Y for i in range(n_sector)]
+        
+        # Household initialization
+        
+        params['Households_var'] = {}
+        
+        params['Households_var']['property_shares'] = [[1/n_households for f in range(n_sector)] for h in range(n_households)]        
+        params['Households_var']['dividends'] =  [0 for lT in lambdaT]
+        params['Households_var']['wealth2income_target'] =  [lT for lT in lambdaT]
+        params['Households_var']['csi'] =  [csi_h for csi_h in csi]
+        
+        params['Households_var']['consumption_shares'] = []
+        params['Households_var']['my_seller'] = []
+        
+        for h in range(n_households):
+            
+            consshare_dict = {}
+            my_seller_dict = {}
+            for i,commodity in enumerate(params['commodities_list']):
+                consshare_dict[commodity] = alpha[i]
+                my_seller_dict[commodity] = i
+            
+            params['Households_var']['consumption_shares'].append(consshare_dict)
+            params['Households_var']['my_seller'].append(my_seller_dict)
+        
+            
+        params['Households_var']['rationing_threshold'] = [rat_threshold for h in range(n_households)]
+        params['Households_var']['field_of_view']= [1 for h in range(n_households)]
+        params['Households_var']['memory_loss'] = [0 for h in range(n_households)]
+        params['Households_var']['opportunism_degree'] = [0 for h in range(n_households)]        
+        params['Households_var']['consumption_from_RoW'] = [{comm: H_from_RoW[i] for i,comm in enumerate(params['commodities_list'])} for h in range(n_households)]
+        
+        params['localKAUs_var'] = {}
+        
+
+                
+        params['localKAUs_var']['previous_demand'] = np.zeros(n_sector)
+        params['localKAUs_var']['markup'] = np.zeros(n_sector)
+        params['localKAUs_var']['net_earnings'] = np.zeros(n_sector)
+        
+        params['localKAUs_var']['rationing_threshold'] = [rat_threshold for k in range(n_sector)]
+        params['localKAUs_var']['field_of_view']= [1 for k in range(n_sector)]
+        params['localKAUs_var']['memory_loss'] = [0 for k in range(n_sector)]
+        params['localKAUs_var']['opportunism_degree'] = [0 for k in range(n_sector)]
+        params['localKAUs_var']['wage_offer'] = np.reshape(wages, (n_sector,))
+        params['localKAUs_var']['labor_tech_coeff'] = np.reshape(labor_tech_coeff, (n_sector,))
+        params['localKAUs_var']['consumption_from_RoW'] = [{comm: KAU_from_RoW[i,j] for i,comm in enumerate(params['commodities_list'])} for j in range(n_sector)]
+        
+        # prod rule and intermediate goods demand parameters
+        params['localKAUs_var']['independence_periods'] = np.array([0 for i in range(n_sector)])
+        params['localKAUs_var']['target_speed'] = np.array([0 for i in range(n_sector)])
+        params['localKAUs_var']['capital_target_speed'] = np.array([v for v in cap_target_speed])
+        
+        # price dynamics
+        params['localKAUs_var']['markup_speed'] = np.array([0 for i in range(n_sector)])
+        
+        return params
     
     
     def create_initcond_Baseline(self, seed, Y, n_firms, n_KAUs4sector, C, wages, labor_tech_coeff , n_households, lambdaT, csi, alpha,  households_sellers, KAUs_sellers, rat_threshold, n_indep_periods =100, shocks = {'active': False}):
@@ -83,13 +381,7 @@ class Experimenter(object):
         params['Households_var'] = {}
         
         params['Households_var']['property_shares'] = [[1/n_households for f in range(n_firms)] for h in range(n_households)]
-        # stationary income as a measure, i.e. equal to 1
-        
-        #params['Households_var']['wealth'] = np.array([(lT)/n_households for lT in lambdaT])
-        ##### vedi sotto
-        
-        #params['Households_var']['wealth'] = params['Households_var']['wealth']/sum(params['Households_var']['wealth'])
-        
+
         
         params['Households_var']['dividends'] =  [0 for lT in lambdaT]
         params['Households_var']['wealth2income_target'] =  [lT for lT in lambdaT]
@@ -244,6 +536,8 @@ class Experimenter(object):
         
         m = md.MyModel(params)        
         results = m.run(n_steps)
+        
+        self.model = m
         
         return results
  
@@ -1023,9 +1317,3 @@ class Experimenter(object):
             Firms_sheet.cell(row=2, column= f+2, value = params['Firms_var']['wealth'][f])   
     
         wb.save(name)
-
-
-
-
-
-

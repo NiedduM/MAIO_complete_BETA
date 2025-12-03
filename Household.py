@@ -7,6 +7,7 @@ Created on Tue May  2 19:29:49 2023
 import random as random
 import agentpy as ap
 import numpy as np
+import math as math
 
 class Household(ap.Agent):
     
@@ -28,6 +29,7 @@ class Household(ap.Agent):
         self.consumption_budgets = {}
         self.consumption_shares = {}
         self.consumptions_qt = {}
+        self.consumption_from_RoW = {}
         
         self.my_seller = {}
         self.attempt_number = 0
@@ -54,7 +56,7 @@ class Household(ap.Agent):
         #self.income = self.dividends + self.wage
         self.dividends = 0
         self.wage = 0
-        self.consumption_budget = self.disposable_income + self.csi*(self.wealth - self.disposable_income - self.wealth2income_target*self.disposable_income)
+        self.consumption_budget = self.disposable_income + self.csi*(self.wealth - self.income - self.wealth2income_target*self.disposable_income)
         if(self.consumption_budget<0):
             self.consumption_budget = 0
         
@@ -124,6 +126,9 @@ class Household(ap.Agent):
         
         if(self.attempt_number == 0):
             
+            
+            self.buy_from_RoW(commodity)
+            
             r = np.random.random()
             
             if(r< self.opportunism_degree):
@@ -152,6 +157,22 @@ class Household(ap.Agent):
         self.attempt_number +=1
                  
                  
+    def buy_from_RoW(self, commodity):
+        
+        RoW = self.model.RoW[0]
+        price = RoW.get_price(commodity)
+        demanded_quantity = self.consumption_from_RoW[commodity]*self.consumption_budgets[commodity]/price        
+        bought_quantity = RoW.sell(commodity, demanded_quantity)
+                    
+        self.consumptions_qt[commodity] += bought_quantity
+        
+        consumption = bought_quantity*price
+        self.consumption += consumption
+        self.wealth -= consumption
+        self.my_bank.deposits[self.id] -= consumption
+        
+        self.consumption_budgets[commodity] -= consumption        
+
 
     def buy_from_sellers_list(self, commodity):
 
@@ -216,14 +237,14 @@ class Household(ap.Agent):
     def search_job(self):
                 
         employers = self.model.localKAU_agents.select(self.model.localKAU_agents.flag_vacancies == 1)
-        
-        if(len(employers) > 0):
-            
-            employer = employers.random(1)[0]            
-            employer.hire(self)            
-            self.flag_employed = 1
-            self.employer_id = employer.id
 
+        if(len(employers) > 0):
+            for employer in employers.random(1):
+                #employer = employers.random(1)[0]            
+                employer.hire(self)            
+                self.flag_employed = 1
+                self.employer_id = employer.id
+                break
         
     def update_employement_status(self):
         
@@ -235,19 +256,20 @@ class Household(ap.Agent):
         
         self.income = self.dividends + self.wage + self.gov_transfer
         
-        rates = self.model.Government.tax_rates['labor']
+        rates = self.model.Government[0].tax_rates['labor']
         my_income_rate = 0
         
-        for i, inc_class in enumerate(rates.key()):
-            
-            if(self.income < inc_class):
+        if(self.flag_employed != 0):
+            for i, inc_class in enumerate(rates.keys()):
                 
-                my_income_rate = rates[inc_class]
-                break
+                if(self.income < inc_class):
+                    
+                    my_income_rate = rates[inc_class]
+                    break
                 
         self.labor_tax = self.wage*my_income_rate        
         
-        self.dividend_tax = self.dividends*self.model.Government.tax_rates['dividends']
+        self.dividend_tax = self.dividends*self.model.Government[0].tax_rates['dividends']
         
         self.disposable_income = self.income - self.labor_tax - self.dividend_tax
         
@@ -259,5 +281,5 @@ class Household(ap.Agent):
         
         self.wealth -= self.dividend_tax
         self.my_bank.deposits[self.id] -= self.dividend_tax
-        
+        self.model.Government[0].receive_taxes(self.labor_tax + self.dividend_tax)
         

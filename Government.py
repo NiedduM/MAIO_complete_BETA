@@ -5,11 +5,11 @@ Created on Wed Jan 15 12:17:03 2024
 @author: marce
 """
 
-
+import numpy as np
 import agentpy as ap
 
 
-class Governement(ap.Agent):
+class Government(ap.Agent):
     
     def setup(self):
         
@@ -25,9 +25,15 @@ class Governement(ap.Agent):
         self.tax_rates = {}
         self.average_wage = 0
         self.ub_fraction = 0
+        self.transfer_fraction = 0
         
         self.consumption_budgets = {}
         self.consumption_shares = {}
+        self.consumption_from_RoW = {}
+        self.consumptions = {}
+        self.consumption = 0
+        
+        self.attempt_number = 0
         
         
     def make_period_account(self):
@@ -36,11 +42,20 @@ class Governement(ap.Agent):
         
         self.taxes = 0
         
+    def compute_average_wage(self):
+        
+        employed_list = self.model.Household_agents.select(self.model.Household_agents.flag_employed == 1)
+        
+        if(len(employed_list) >0):
+            self.average_wage = sum(employed_list.wage)/len(employed_list)
+            
+        #print(self.average_wage)
+        
 
 
     def distribute_transfers(self):
         
-        transfers = self.average_wage*self.transfer_fraction*len(self.model.Households_agents)
+        transfers = self.average_wage*self.transfer_fraction*len(self.model.Household_agents)
         
         transfers_h = self.average_wage*self.transfer_fraction
         
@@ -48,18 +63,21 @@ class Governement(ap.Agent):
             
             if(self.liquidity>0):
             
-                transfers_h = transfers/self.liquidity
+                transfers_h =  self.liquidity/len(self.model.Household_agents) #transfers/self.liquidity
             else:
                 transfers_h = 0
             
-        for h in self.model.Households_agents:
+        for h in self.model.Household_agents:
             
             h.reveice_transfer(transfers_h)
+            self.liquidity -= transfers_h
         
         
     def distribute_unemployment_benefits(self):
         
-        unemployed_list = self.model.Hosehold_agents.select(self.model.Hosehold_agents.flag_employed == 0)
+        self.compute_average_wage()
+        
+        unemployed_list = self.model.Household_agents.select(self.model.Household_agents.flag_employed == 0)
         
         if(len(unemployed_list)>0):
             
@@ -86,21 +104,25 @@ class Governement(ap.Agent):
     def determine_consumption_budgets(self):
        
         self.consumption_budget = max(0, self.liquidity)
-        
-        
-        
+       
         for comm in self.consumption_shares.keys():
             
             self.consumption_budgets[comm] = self.consumption_shares[comm]*self.consumption_budget
+            self.consumptions[comm] = 0
+        self.consumption = 0
             
-         
-        
-        
     def buy(self, commodity):
         
+        
+        if(self.attempt_number == 0):
+            if(self.consumption_budgets[commodity] > 0):
+                self.buy_from_RoW(commodity)
+        
         if(self.consumption_budgets[commodity] > 0):
+
+
             
-            sellers_list = self.model.localKAU_agents.select(self.model.localKAU_agents.my_commodity == commodity and self.model.localKAU_agents.supply>0)
+            sellers_list = self.model.localKAU_agents.select(self.model.localKAU_agents.my_commodity == commodity ) #and self.model.localKAU_agents.supply>0)
 
             n_sellers = len(sellers_list)
             
@@ -115,18 +137,31 @@ class Governement(ap.Agent):
                     demanded_quantity = demand/price
                     
                     bought_quantity = s.sell(demanded_quantity)
-                    
+                    #print('Gov buying from ', s.id)
                     expenditure = bought_quantity*price
                     
                     self.consumption_budgets[commodity] -= expenditure
                     self.liquidity -= expenditure
+                    self.consumption += expenditure
+                    self.consumptions[commodity] += expenditure
         
+        self.attempt_number +=1        
                     
-
+    def buy_from_RoW(self, commodity):
+        
+        RoW = self.model.RoW[0]
+        price = RoW.get_price(commodity)
+        demanded_quantity = self.consumption_from_RoW[commodity]*self.consumption_budgets[commodity]/price        
+        bought_quantity = RoW.sell(commodity, demanded_quantity)
+        consumption = bought_quantity*price
+        self.liquidity -= consumption        
+        self.consumption_budgets[commodity] -= consumption
+        self.consumption += consumption
+        self.consumptions[commodity] += consumption
                     
     def reset_market_vars(self):
         
-        pass
+        self.attempt_number = 0
     
     def update_sellers_list(self, commodity):
         
