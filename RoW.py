@@ -20,7 +20,10 @@ class RoW(ap.Agent):
         self.suppliers_weights = {}
         self.attempt_number = 0
         self.liquidity = 0
-
+        self.prices = {}
+        self.GDP = 0
+        self.growth_rate = 0
+        self.consumption2GDP = 0
 
     def determine_consumption_budgets(self):
         
@@ -38,14 +41,15 @@ class RoW(ap.Agent):
             for ag in self.suppliers_weights[commodity].keys():
                 
                 demand = self.suppliers_weights[commodity][ag]*self.consumption_budgets[commodity]/ag.price
-                
+                #print(demand)
                 bought_quantity = ag.sell(demand)
                 
                 expenditure = bought_quantity*ag.price
                 
                 self.consumptions[commodity] += expenditure
-                self.liquidity = -expenditure
-
+                self.liquidity -= expenditure
+                #print('RoW buy :liquidity', self.liquidity)
+            self.attempt_number +=1
     
     def sell(self, commodity, demand):
         
@@ -53,9 +57,9 @@ class RoW(ap.Agent):
         if(demand>0):
             sold_quantity =  demand       
 
-        self.sails[commodity] += sold_quantity
+        self.sails[commodity] += self.prices[commodity]*sold_quantity
         self.liquidity += self.prices[commodity]*sold_quantity
-        
+        #print('RoW sell :liquidity', self.liquidity)
         return sold_quantity
     
     
@@ -67,11 +71,14 @@ class RoW(ap.Agent):
             
             self.sails[comm] = 0
             self.consumptions[comm] = 0
+            
+    def get_price(self, commodity):
         
-        
+        return self.prices[commodity]
+         
     def reset_market_vars(self):
         
-        pass
+        self.attempt_number = 0
     
     def update_sellers_list(self, commodity):
         
